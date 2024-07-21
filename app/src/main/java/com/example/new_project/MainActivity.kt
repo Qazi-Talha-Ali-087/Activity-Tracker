@@ -4,19 +4,18 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import android.hardware.SensorManager.GRAVITY_EARTH
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardOptions
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.text.input.KeyboardType
 import com.example.new_project.ui.theme.New_ProjectTheme
 
 class MainActivity : ComponentActivity(), SensorEventListener {
@@ -30,6 +29,12 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     var magnetometerValues by mutableStateOf(floatArrayOf(0f, 0f, 0f))
     var gyroscopeValues by mutableStateOf(floatArrayOf(0f, 0f, 0f))
     var predictionResult by mutableStateOf(floatArrayOf())
+
+    private var height by mutableStateOf(0f)
+    private var age by mutableStateOf(0)
+    private var weight by mutableStateOf(0f)
+
+    private val coefficients = floatArrayOf(1f, 0.5f, 0.1f, 0.05f, 0.01f) // Example coefficients
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -53,7 +58,15 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    SensorDataDisplay(accelerometerValues, magnetometerValues, gyroscopeValues, predictionResult)
+                    Column {
+                        UserInputForm { heightValue, ageValue, weightValue ->
+                            height = heightValue
+                            age = ageValue
+                            weight = weightValue
+                            Log.d("UserInput", "Height: $height, Age: $age, Weight: $weight")
+                        }
+                        SensorDataDisplay(accelerometerValues, magnetometerValues, gyroscopeValues, predictionResult)
+                    }
                 }
             }
         }
@@ -91,15 +104,20 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         }
         val input = prepareInput(accelerometerValues, gyroscopeValues, magnetometerValues)
         predictionResult = tfliteModel.predict(input)
+
+        // Compute EEAC and EE
+        val eeacValues = tfliteModel.computeEEAC(accelerometerValues.copyOfRange(0, 1), accelerometerValues.copyOfRange(1, 2), accelerometerValues.copyOfRange(2, 3))
+        val eeValues = tfliteModel.computeEE(eeacValues, age.toFloat(), height, weight, coefficients)
+        Log.d("EE Values", "EE Values: ${eeValues.joinToString(", ")}")
     }
 
     private fun prepareInput(acc: FloatArray, gyro: FloatArray, mag: FloatArray): FloatArray {
         // Assuming the model was trained on normalized data
         return floatArrayOf(
             // Normalize accelerometer data (example normalization)
-            (acc[0] / GRAVITY_EARTH),
-            (acc[1] / GRAVITY_EARTH),
-            (acc[2] / GRAVITY_EARTH),
+            (acc[0] / SensorManager.GRAVITY_EARTH),
+            (acc[1] / SensorManager.GRAVITY_EARTH),
+            (acc[2] / SensorManager.GRAVITY_EARTH),
             // Normalize gyroscope data (if necessary)
             gyro[0],
             gyro[1],
@@ -111,41 +129,50 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         )
     }
 
-
-
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
         // Can be implemented if necessary
     }
 }
 
 @Composable
-fun SensorDataDisplay(accelerometerValues: FloatArray, magnetometerValues: FloatArray, gyroscopeValues: FloatArray, predictions: FloatArray) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        Text(text = "Accelerometer Data:", style = MaterialTheme.typography.headlineMedium)
-        Text(text = "X: ${accelerometerValues[0]}", style = MaterialTheme.typography.bodyLarge)
-        Text(text = "Y: ${accelerometerValues[1]}", style = MaterialTheme.typography.bodyLarge)
-        Text(text = "Z: ${accelerometerValues[2]}", style = MaterialTheme.typography.bodyLarge)
-        Text(text = "Magnetometer Data:", style = MaterialTheme.typography.headlineMedium)
-        Text(text = "X: ${magnetometerValues[0]}", style = MaterialTheme.typography.bodyLarge)
-        Text(text = "Y: ${magnetometerValues[1]}", style = MaterialTheme.typography.bodyLarge)
-        Text(text = "Z: ${magnetometerValues[2]}", style = MaterialTheme.typography.bodyLarge)
-        Text(text = "Gyroscope Data:", style = MaterialTheme.typography.headlineMedium)
-        Text(text = "X: ${gyroscopeValues[0]}", style = MaterialTheme.typography.bodyLarge)
-        Text(text = "Y: ${gyroscopeValues[1]}", style = MaterialTheme.typography.bodyLarge)
-        Text(text = "Z: ${gyroscopeValues[2]}", style = MaterialTheme.typography.bodyLarge)
-        Text(text = "Prediction: ${predictions.joinToString(", ")}", style = MaterialTheme.typography.headlineMedium)
+fun UserInputForm(onSubmit: (Float, Int, Float) -> Unit) {
+    var height by remember { mutableStateOf("") }
+    var age by remember { mutableStateOf("") }
+    var weight by remember { mutableStateOf("") }
+
+    Column {
+        TextField(
+            value = height,
+            onValueChange = { height = it },
+            label = { Text("Height (m)") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+        )
+        TextField(
+            value = age,
+            onValueChange = { age = it },
+            label = { Text("Age") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+        )
+        TextField(
+            value = weight,
+            onValueChange = { weight = it },
+            label = { Text("Weight (kg)") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+        )
+        Button(onClick = {
+            onSubmit(height.toFloatOrNull() ?: 0f, age.toIntOrNull() ?: 0, weight.toFloatOrNull() ?: 0f)
+        }) {
+            Text("Submit")
+        }
     }
 }
 
-@Preview(showBackground = true)
 @Composable
-fun DefaultPreview() {
-    New_ProjectTheme {
-        SensorDataDisplay(
-            floatArrayOf(1.0f, 2.0f, 3.0f),
-            floatArrayOf(4.0f, 5.0f, 6.0f),
-            floatArrayOf(7.0f, 8.0f, 9.0f),
-            floatArrayOf(0.0f)
-        )
+fun SensorDataDisplay(accelerometerValues: FloatArray, magnetometerValues: FloatArray, gyroscopeValues: FloatArray, predictions: FloatArray) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        Text(text = "Accelerometer Data: ${accelerometerValues.joinToString(", ")}", style = MaterialTheme.typography.headlineMedium)
+        Text(text = "Magnetometer Data: ${magnetometerValues.joinToString(", ")}", style = MaterialTheme.typography.headlineMedium)
+        Text(text = "Gyroscope Data: ${gyroscopeValues.joinToString(", ")}", style = MaterialTheme.typography.headlineMedium)
+        Text(text = "Predictions: ${predictions.joinToString(", ")}", style = MaterialTheme.typography.headlineMedium)
     }
 }
